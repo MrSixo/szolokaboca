@@ -4,3 +4,6 @@ __pycache__/
 .claude/
 *.zip
 .env
+
+# Generált adat — a deploy workflow építi minden futáskor (nem verziózzuk)
+data/
