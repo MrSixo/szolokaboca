@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -97,12 +98,18 @@ def build_station(station: str, year: int) -> dict | None:
     if not rows or meta["lat"] is None:
         return None
 
+    # Hőmérséklet nélküli állomás (pl. csak csapadékmérő) kizárása.
+    has_temp = any(not (math.isnan(tm) and math.isnan(tn) and math.isnan(tx))
+                   for _, tm, tn, tx in rows)
+    if not has_temp:
+        return None
+
     base, upper = eng.DEFAULT_BASE_TEMP_C, eng.DEFAULT_UPPER_TEMP_C
     sine = eng.accumulate(rows, base, upper, "sine")
     avg = eng.accumulate(rows, base, upper, "avg")
 
     series = [
-        {"date": eng.fmt_date(d), "dd_sine": round(ds, 2), "dd_avg": round(da, 2),
+        {"date": eng.fmt_date(d), "dd_sine": _clean(ds, 2), "dd_avg": _clean(da, 2),
          "cum_sine": round(cs, 1), "cum_avg": round(ca, 1), "is_forecast": False}
         for (d, ds, cs), (_, da, ca) in zip(sine, avg)
     ]
@@ -129,9 +136,14 @@ def index_entry(st: dict) -> dict:
     }
 
 
+def _clean(x, ndigits):
+    """NaN → None (érvényes JSON null), egyébként kerekít."""
+    return None if x != x else round(x, ndigits)
+
+
 def write_json(path: str, data) -> None:
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def main():
