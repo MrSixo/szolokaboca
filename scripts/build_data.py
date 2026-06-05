@@ -94,20 +94,27 @@ def build_station(station: str, year: int) -> dict | None:
     except SystemExit:
         return None
     meta = parse_meta(csv_text)
-    rows = eng.parse_daily(csv_text, year)
-    if not rows or meta["lat"] is None:
-        return None
-
-    # Hőmérséklet nélküli állomás (pl. csak csapadékmérő) kizárása.
-    has_temp = any(not (math.isnan(tm) and math.isnan(tn) and math.isnan(tx))
-                   for _, tm, tn, tx in rows)
-    if not has_temp:
-        return None
+    if meta["lat"] is None:
+        return None  # térképre nem helyezhető, kihagyjuk
 
     base, upper = eng.DEFAULT_BASE_TEMP_C, eng.DEFAULT_UPPER_TEMP_C
+    common = {
+        "id": int(station), "name": meta["name"],
+        "lat": meta["lat"], "lon": meta["lon"], "elev": meta["elev"],
+        "year": year, "base_temp": base, "upper_temp": upper,
+    }
+
+    rows = eng.parse_daily(csv_text, year)
+    # Hőmérséklet-adat hiánya (pl. romlott szenzor) NEM kizárás — az állomás
+    # "nincs adat" állapotban marad, és a napi build visszahozza, ha újra mér.
+    has_temp = any(not (math.isnan(tm) and math.isnan(tn) and math.isnan(tx))
+                   for _, tm, tn, tx in rows)
+    if not rows or not has_temp:
+        return {**common, "has_data": False, "last_date": None,
+                "series": [], "stages": None, "cum_sine": None, "cum_avg": None}
+
     sine = eng.accumulate(rows, base, upper, "sine")
     avg = eng.accumulate(rows, base, upper, "avg")
-
     series = [
         {"date": eng.fmt_date(d), "dd_sine": _clean(ds, 2), "dd_avg": _clean(da, 2),
          "cum_sine": round(cs, 1), "cum_avg": round(ca, 1), "is_forecast": False}
@@ -118,21 +125,21 @@ def build_station(station: str, year: int) -> dict | None:
     stages = {"sine": stage_windows(cum_sine), "avg": stage_windows(cum_avg)}
 
     return {
-        "id": int(station), "name": meta["name"],
-        "lat": meta["lat"], "lon": meta["lon"], "elev": meta["elev"],
-        "year": year, "base_temp": base, "upper_temp": upper,
-        "last_date": series[-1]["date"], "series": series, "stages": stages,
+        **common, "has_data": True, "last_date": series[-1]["date"],
+        "series": series, "stages": stages,
         "cum_sine": series[-1]["cum_sine"], "cum_avg": series[-1]["cum_avg"],
     }
 
 
 def index_entry(st: dict) -> dict:
+    stages = st["stages"]
     return {
         "id": st["id"], "name": st["name"],
         "lat": st["lat"], "lon": st["lon"], "elev": st["elev"],
-        "last_date": st["last_date"], "cum_sine": st["cum_sine"], "cum_avg": st["cum_avg"],
-        "stage_sine": current_stage(st["stages"]["sine"]),
-        "stage_avg": current_stage(st["stages"]["avg"]),
+        "has_data": st["has_data"], "last_date": st["last_date"],
+        "cum_sine": st["cum_sine"], "cum_avg": st["cum_avg"],
+        "stage_sine": current_stage(stages["sine"]) if stages else None,
+        "stage_avg": current_stage(stages["avg"]) if stages else None,
     }
 
 
